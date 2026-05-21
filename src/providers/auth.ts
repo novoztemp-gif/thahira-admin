@@ -3,7 +3,6 @@ import { supabaseClient } from "./supabase-client";
 
 const authProvider: AuthProvider = {
   login: async ({ email, password, providerName }) => {
-    // sign in with oauth
     try {
       if (providerName) {
         const { data, error } = await supabaseClient.auth.signInWithOAuth({
@@ -11,17 +10,11 @@ const authProvider: AuthProvider = {
         });
 
         if (error) {
-          return {
-            success: false,
-            error,
-          };
+          return { success: false, error };
         }
 
         if (data?.url) {
-          return {
-            success: true,
-            redirectTo: "/",
-          };
+          return { success: true, redirectTo: "/" };
         }
       }
 
@@ -32,23 +25,35 @@ const authProvider: AuthProvider = {
       });
 
       if (error) {
-        return {
-          success: false,
-          error,
-        };
+        return { success: false, error };
       }
 
       if (data?.user) {
+        // 🔒 THE VAULT DOOR: Check if they are admin BEFORE letting them in
+        const { data: profile } = await supabaseClient
+          .from("profiles")
+          .select("role")
+          .eq("id", data.user.id)
+          .single();
+
+        if (!profile || profile.role !== "admin") {
+          await supabaseClient.auth.signOut(); // Kick them out instantly
+          return {
+            success: false,
+            error: {
+              name: "Access Denied",
+              message: "You are not authorized to access the admin panel.",
+            },
+          };
+        }
+
         return {
           success: true,
           redirectTo: "/",
         };
       }
     } catch (error: any) {
-      return {
-        success: false,
-        error,
-      };
+      return { success: false, error };
     }
 
     return {
@@ -67,67 +72,42 @@ const authProvider: AuthProvider = {
       });
 
       if (error) {
-        return {
-          success: false,
-          error,
-        };
+        return { success: false, error };
       }
 
       if (data) {
-        return {
-          success: true,
-          redirectTo: "/",
-        };
+        return { success: true, redirectTo: "/" };
       }
     } catch (error: any) {
-      return {
-        success: false,
-        error,
-      };
+      return { success: false, error };
     }
 
     return {
       success: false,
-      error: {
-        message: "Register failed",
-        name: "Invalid email or password",
-      },
+      error: { message: "Register failed", name: "Invalid email or password" },
     };
   },
   forgotPassword: async ({ email }) => {
     try {
       const { data, error } = await supabaseClient.auth.resetPasswordForEmail(
         email,
-        {
-          redirectTo: `${window.location.origin}/update-password`,
-        }
+        { redirectTo: `${window.location.origin}/update-password` }
       );
 
       if (error) {
-        return {
-          success: false,
-          error,
-        };
+        return { success: false, error };
       }
 
       if (data) {
-        return {
-          success: true,
-        };
+        return { success: true };
       }
     } catch (error: any) {
-      return {
-        success: false,
-        error,
-      };
+      return { success: false, error };
     }
 
     return {
       success: false,
-      error: {
-        message: "Forgot password failed",
-        name: "Invalid email",
-      },
+      error: { message: "Forgot password failed", name: "Invalid email" },
     };
   },
   updatePassword: async ({ password }) => {
@@ -137,46 +117,28 @@ const authProvider: AuthProvider = {
       });
 
       if (error) {
-        return {
-          success: false,
-          error,
-        };
+        return { success: false, error };
       }
 
       if (data) {
-        return {
-          success: true,
-          redirectTo: "/",
-        };
+        return { success: true, redirectTo: "/" };
       }
     } catch (error: any) {
-      return {
-        success: false,
-        error,
-      };
+      return { success: false, error };
     }
     return {
       success: false,
-      error: {
-        message: "Update password failed",
-        name: "Invalid password",
-      },
+      error: { message: "Update password failed", name: "Invalid password" },
     };
   },
   logout: async () => {
     const { error } = await supabaseClient.auth.signOut();
 
     if (error) {
-      return {
-        success: false,
-        error,
-      };
+      return { success: false, error };
     }
 
-    return {
-      success: true,
-      redirectTo: "/",
-    };
+    return { success: true, redirectTo: "/" };
   },
   onError: async (error) => {
     console.error(error);
@@ -190,35 +152,51 @@ const authProvider: AuthProvider = {
       if (!session) {
         return {
           authenticated: false,
-          error: {
-            message: "Check failed",
-            name: "Session not found",
-          },
           logout: true,
           redirectTo: "/login",
         };
       }
+
+      // Check if user is still an admin
+      const { data: profile } = await supabaseClient
+        .from("profiles")
+        .select("role")
+        .eq("id", session.user.id)
+        .single();
+
+      if (!profile || profile.role !== "admin") {
+        await supabaseClient.auth.signOut();
+        return {
+          authenticated: false,
+          logout: true,
+          redirectTo: "/login",
+          error: {
+            name: "Access Denied",
+            message: "You are not authorized to access the admin panel.",
+          },
+        };
+      }
+
+      return { authenticated: true };
+
     } catch (error: any) {
       return {
         authenticated: false,
-        error: error || {
-          message: "Check failed",
-          name: "Not authenticated",
-        },
         logout: true,
         redirectTo: "/login",
       };
     }
-
-    return {
-      authenticated: true,
-    };
   },
   getPermissions: async () => {
-    const user = await supabaseClient.auth.getUser();
+    const { data } = await supabaseClient.auth.getUser();
 
-    if (user) {
-      return user.data.user?.role;
+    if (data?.user) {
+      const { data: profile } = await supabaseClient
+        .from("profiles")
+        .select("role")
+        .eq("id", data.user.id)
+        .single();
+      return profile?.role;
     }
 
     return null;
